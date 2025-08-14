@@ -74,7 +74,7 @@ async def asr(
     diarize: bool = Query(
         default=False,
         description="Diarize the input",
-        include_in_schema=(True if CONFIG.ASR_ENGINE == "whisperx" and CONFIG.HF_TOKEN != "" else False),
+        include_in_schema=(True if CONFIG.HF_TOKEN != "" and CONFIG.ASR_ENGINE in ["whisperx", "faster_whisper"] else False),
     ),
     min_speakers: Union[int, None] = Query(
         default=None,
@@ -86,6 +86,11 @@ async def asr(
         description="Max speakers in this file",
         include_in_schema=(True if CONFIG.ASR_ENGINE == "whisperx" else False),
     ),
+    recognize_speakers: bool = Query(
+        default=False,
+        description="If enabled, attempt to recognize diarized speakers using enrolled voice profiles.",
+        include_in_schema=(True if CONFIG.ASR_ENGINE == "whisperx" and CONFIG.SPEAKER_RECOGNITION else False),
+    ),
     output: Union[str, None] = Query(default="txt", enum=["txt", "vtt", "srt", "tsv", "json"]),
 ):
     result = asr_model.transcribe(
@@ -95,7 +100,7 @@ async def asr(
         initial_prompt,
         vad_filter,
         word_timestamps,
-        {"diarize": diarize, "min_speakers": min_speakers, "max_speakers": max_speakers},
+        {"diarize": diarize, "min_speakers": min_speakers, "max_speakers": max_speakers, "recognize": recognize_speakers},
         output,
     )
     return StreamingResponse(
@@ -119,6 +124,37 @@ async def detect_language(
         "language_code": detected_lang_code,
         "confidence": confidence,
     }
+
+if CONFIG.SPEAKER_RECOGNITION and CONFIG.ASR_ENGINE == "whisperx":
+    from fastapi import Body
+    from app.speaker_recognition import SpeakerRecognizer
+
+    _spk = SpeakerRecognizer(
+        model_id=CONFIG.SPEAKER_EMBEDDING_MODEL,
+        use_auth_token=CONFIG.HF_TOKEN or None,
+        device=CONFIG.DEVICE,
+        store_path=CONFIG.SPEAKER_STORE_PATH,
+        match_threshold=CONFIG.SPEAKER_SIMILARITY_THRESHOLD,
+    )
+
+    @app.post("/speakers/enroll", tags=["Speakers"])
+    async def enroll_speaker(
+        name: str = Query(..., description="Unique speaker name"),
+        audio_file: UploadFile = File(...),  
+        encode: bool = Query(default=True, description="Encode audio first through ffmpeg"),
+    ):
+        audio = load_audio(audio_file.file, encode)
+        prof = _spk.enroll(name, audio, CONFIG.SAMPLE_RATE)
+        return {"name": prof.name}
+
+    @app.get("/speakers", tags=["Speakers"])
+    async def list_speakers():
+        return {"speakers": _spk.list()}
+
+    @app.delete("/speakers/{name}", tags=["Speakers"])
+    async def delete_speaker(name: str):
+        ok = _spk.delete(name)
+        return {"deleted": ok}
 
 
 @click.command()

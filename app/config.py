@@ -45,3 +45,15 @@ class CONFIG:
     SUBTITLE_MAX_LINE_WIDTH = int(os.getenv("SUBTITLE_MAX_LINE_WIDTH", 1000))
     SUBTITLE_MAX_LINE_COUNT = int(os.getenv("SUBTITLE_MAX_LINE_COUNT", 2))
     SUBTITLE_HIGHLIGHT_WORDS = os.getenv("SUBTITLE_HIGHLIGHT_WORDS", "false").lower() == "true"
+
+    # Speaker recognition settings
+    SPEAKER_RECOGNITION = os.getenv("SPEAKER_RECOGNITION", "false").lower() == "true"
+    # By default use a transformers XVector model suitable for speaker verification
+    SPEAKER_EMBEDDING_MODEL = os.getenv("SPEAKER_EMBEDDING_MODEL", "microsoft/wavlm-base-plus-sv")
+    # Cosine similarity threshold above which a speaker is considered a match
+    SPEAKER_SIMILARITY_THRESHOLD = float(os.getenv("SPEAKER_SIMILARITY_THRESHOLD", 0.75))
+    # Where to persist enrolled speaker embeddings
+    SPEAKER_STORE_PATH = os.getenv(
+        "SPEAKER_STORE_PATH",
+        os.path.join(os.path.expanduser("~"), ".cache", "whisper", "speakers.json"),
+    )

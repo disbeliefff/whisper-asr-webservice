@@ -21,6 +21,23 @@ class WhisperXASR(ASRModel):
             'align_model': {}
         }
 
+        # Lazy import to avoid hard dependency if feature is disabled
+        self.spk_recognizer = None
+
+    def _ensure_speaker_recognizer(self):
+        if not CONFIG.SPEAKER_RECOGNITION:
+            return
+        if self.spk_recognizer is not None:
+            return
+        from app.speaker_recognition import SpeakerRecognizer
+        self.spk_recognizer = SpeakerRecognizer(
+            model_id=CONFIG.SPEAKER_EMBEDDING_MODEL,
+            use_auth_token=CONFIG.HF_TOKEN or None,
+            device=CONFIG.DEVICE,
+            store_path=CONFIG.SPEAKER_STORE_PATH,
+            match_threshold=CONFIG.SPEAKER_SIMILARITY_THRESHOLD,
+        )
+
     def load_model(self):
         asr_options = {"without_timestamps": False}
         self.model['whisperx'] = whisperx.load_model(
@@ -78,12 +95,19 @@ class WhisperXASR(ASRModel):
             result["segments"], model_x, metadata, audio, CONFIG.DEVICE, return_char_alignments=False
         )
 
+        # Optional diarization and speaker recognition
         if options.get("diarize", False) and CONFIG.HF_TOKEN != "":
             min_speakers = options.get("min_speakers", None)
             max_speakers = options.get("max_speakers", None)
             # add min/max number of speakers if known
             diarize_segments = self.model['diarize_model'](audio, min_speakers, max_speakers)
             result = whisperx.assign_word_speakers(diarize_segments, result)
+
+            # If enabled and requested, map diarization speaker ids to recognized identities
+            if options.get("recognize", False):
+                self._ensure_speaker_recognizer()
+                if self.spk_recognizer is not None:
+                    result = self.spk_recognizer.annotate_segment_speakers(result, audio, sr=CONFIG.SAMPLE_RATE)
         result["language"] = language
 
         output_file = StringIO()
